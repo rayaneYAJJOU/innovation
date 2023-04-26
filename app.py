@@ -10,6 +10,8 @@ from Source.logger import logging
 
 #Title
 st.title('Portfolio Optimization Tool')
+st.write('1) Select the dates')
+st.write('2) Enter tickers')
 
 # Take user input for number of stocks
 num_stocks = st.number_input('Enter number of stocks:',value = 2)
