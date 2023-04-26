@@ -146,7 +146,7 @@ table = download(stocks)
 def app():
     '''This code defines a function app() that is called when the script is executed as the 
     main program'''
-    if num_stocks:
+    if num_stocks>1:
         st.subheader('Plot shows how stock prices have evolved in the given time frame')
         plot_download(stocks)
         st.subheader('Plot of daily returns to see volatility')
@@ -158,6 +158,6 @@ def app():
         risk_free_rate = 0.0178
         display_simulated_ef_with_random(mean_returns, cov_matrix, num_portfolios, risk_free_rate)
     else:
-        st.subheader('Enter your stock tickers') 
+        st.subheader('Enter your stock tickers, there must be atleast 2 tickers') 
 if __name__ == "__main__":
     app()
