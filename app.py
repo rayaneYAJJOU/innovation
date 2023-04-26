@@ -14,7 +14,7 @@ st.write('1) Select the dates')
 st.write('2) Enter tickers')
 
 # Take user input for number of stocks
-num_stocks = st.number_input('Enter number of stocks:',value = 2)
+num_stocks = st.number_input('Enter number of stocks:',value = 0)
 
 # Take user input for stock tickers
 stocks = []
