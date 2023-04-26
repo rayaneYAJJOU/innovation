@@ -1,0 +1,25 @@
+import sys
+from Source.logger import logging 
+
+def error_message_detail(error,error_detail:sys):
+    """
+    A function that takes an error message and its details and returns a formatted error message with file name, line number, and error message.
+    """
+    _, _, exc_tb = error_detail.exc_info()  # Get the traceback information of the error
+    file_name = exc_tb.tb_frame.f_code.co_filename  # Extract the file name from the traceback information
+    error_message = "Error occured in python script name [{0}] line number [{1}] error message[{2}]".format(
+     file_name, exc_tb.tb_lineno, str(error))  # Format the error message with file name, line number, and error message
+
+    return error_message
+    
+
+class CustomException(Exception):
+    """
+    A custom exception class that takes an error message and its details and formats the error message with the file name, line number, and error message.
+    """
+    def __init__(self, error_message, error_detail:sys):
+        super().__init__(error_message)  # Initialize the Exception class with the error message
+        self.error_message = error_message_detail(error_message, error_detail=error_detail)  # Format the error message with the file name, line number, and error message
+    
+    def __str__(self):
+        return self.error_message  # Return the formatted error message as a string
