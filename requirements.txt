@@ -2,7 +2,7 @@ pandas
 numpy 
 matplotlib
 seaborn
-yfinance
+quandl
 streamlit
 cvxpy
 -e .
