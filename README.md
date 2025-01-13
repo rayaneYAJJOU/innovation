@@ -37,7 +37,7 @@ pip install -r requirements.txt
 
 After installing the packages, run the following command:
 
-streamlit run app.py
+streamlit run app.py  (si ça ne marche pas utiliser le chemin complet de app.py)
 
 This should open a new tab in your default browser, displaying the web-based Portfolio Optimization Tool.
 

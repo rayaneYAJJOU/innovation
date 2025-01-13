@@ -2,7 +2,8 @@ pandas
 numpy 
 matplotlib
 seaborn
-quandl
+yfinance
 streamlit
 cvxpy
+plotly
 -e .
