@@ -9,8 +9,7 @@ import seaborn as sns
 import plotly.express as px
 from Source.exception import CustomException
 from Source.logger import logging
-from sklearn.linear_model import Ridge
-from sklearn.model_selection import train_test_split
+from math import comb
 
 def bar():
     st.write("-"*80)
@@ -25,8 +24,8 @@ st.sidebar.write('1) Select the dates')
 start_date = st.sidebar.date_input('Start date') #start date of analysis
 end_date = st.sidebar.date_input('End date') #end date of analysis
 
-st.sidebar.write('2) Enter tickers')
-num_stocks = st.sidebar.number_input('Enter number of stocks:',value = 0)
+st.sidebar.write('2) Enter total number of stocks')
+num_stocks = st.sidebar.number_input('',value = 0)
 
 # Take user input for stock tickers
 stocks = []
@@ -35,8 +34,23 @@ for i in range(num_stocks):
     stock = st.sidebar.text_input(f'Enter stock ticker {i+1}:')
     stocks.append(stock.upper())
 
-st.sidebar.write("3) Ou charger un fichier en format csv")
+st.sidebar.write("Ou charger un fichier en format csv")
 data_uploaded = st.sidebar.file_uploader("Upload stock data")
+
+st.sidebar.write('3) Enter number of stocks in basket')
+num_basket = st.sidebar.number_input('', value = 0, max_value = num_stocks)
+
+st.sidebar.write('4) Enter the investor\'s initial capital')
+initial_capital = st.sidebar.number_input('Initial Capital ($)', min_value=1, value=100000)  # Default value of 100,000$
+
+def comb_list(arr, k):
+    n = len(arr)
+
+    cnk = comb(n, k)
+
+    combs = []
+
+    ptr = 0
 
 def download(stocks):  # Function to download stock data
     try:
@@ -122,6 +136,27 @@ def random_portfolios(num_portfolios, mean_returns, cov_matrix, risk_free_rate):
         
     return results, weights_record
 
+def get_correlation_matrix(cov_matrix):
+    variances = np.diag(cov_matrix)
+
+    # 2. Calculer les racines carrées des variances
+    std_devs = np.sqrt(variances)
+
+    # 3. Normaliser la matrice de covariance pour obtenir la matrice de corrélation
+    corr_mat = cov_matrix / (std_devs[:, None] * std_devs[None, :])
+
+    # Convertir en un numpy array si vous voulez
+    corr_mat = corr_mat.to_numpy()
+    
+    return corr_mat
+
+def show_correlation_matrix(cov_matrix, corr_mat):
+    st.write("Correlation matrix:")
+
+    plt.figure(figsize=(8, 6))
+    sns.heatmap(corr_mat, annot=True, cmap="coolwarm", fmt=".2f", xticklabels=cov_matrix.columns, yticklabels=cov_matrix.columns)
+    st.pyplot(plt)
+
 def display_simulated_ef_with_random(mean_returns, cov_matrix, num_portfolios, risk_free_rate,table):
     '''This is a Python function that uses the mean returns and covariance matrix of a set of assets to simulate a
       number of portfolios with random weights, calculate their returns and volatility, and plot them on a scatter plot.
@@ -142,23 +177,6 @@ def display_simulated_ef_with_random(mean_returns, cov_matrix, num_portfolios, r
         min_vol_allocation.Allocation = [round(i*100,2)for i in min_vol_allocation.Allocation]
         min_vol_allocation = min_vol_allocation.T
 
-        variances = np.diag(cov_matrix)
-
-        # 2. Calculer les racines carrées des variances
-        std_devs = np.sqrt(variances)
-
-        # 3. Normaliser la matrice de covariance pour obtenir la matrice de corrélation
-        corr_mat = cov_matrix / (std_devs[:, None] * std_devs[None, :])
-
-        # Convertir en un numpy array si vous voulez
-        corr_mat = corr_mat.to_numpy()
-        
-        st.write("Correlation matrix:")
-
-        plt.figure(figsize=(8, 6))
-        sns.heatmap(corr_mat, annot=True, cmap="coolwarm", fmt=".2f", xticklabels=cov_matrix.columns, yticklabels=cov_matrix.columns)
-        st.pyplot(plt)
-
         bar()
         st.write("Maximum Sharpe Ratio Portfolio Allocation\n")
         st.write("Annualised Return:", round(rp,2))
@@ -168,6 +186,7 @@ def display_simulated_ef_with_random(mean_returns, cov_matrix, num_portfolios, r
 
         fig, ax = plt.subplots()
         ax.pie(max_sharpe_allocation.loc["Allocation"].values, labels = max_sharpe_allocation.columns, autopct='%1.1f%%', startangle=90)
+        ax.legend(max_sharpe_allocation.columns, title="Composants", loc="upper left", bbox_to_anchor=(1, 1))
 
         # Assurer que le graphique soit circulaire
         ax.axis('equal')
@@ -183,6 +202,7 @@ def display_simulated_ef_with_random(mean_returns, cov_matrix, num_portfolios, r
 
         fig, ax = plt.subplots()
         ax.pie(min_vol_allocation.loc["Allocation"].values, labels = min_vol_allocation.columns, autopct='%1.1f%%', startangle=90)
+        ax.legend(min_vol_allocation.columns, title="Composants", loc="upper left", bbox_to_anchor=(1, 1))
 
         # Assurer que le graphique soit circulaire
         ax.axis('equal')
@@ -235,7 +255,7 @@ def sortino_ratio(returns, risk_free_rate=0.0178, target_return=0):
     
     return sortino
 
-def monte_carlo_simulation(optimal_weights, num_simulations=10000, num_days=252):
+def monte_carlo_simulation(optimal_weights, risk_free_rate=0.0178, num_simulations=10000, num_days=252):
     """
     Effectue une simulation Monte Carlo pour évaluer un portefeuille d'actifs optimisé selon le modèle de Markowitz.
     
@@ -279,6 +299,11 @@ def monte_carlo_simulation(optimal_weights, num_simulations=10000, num_days=252)
     portfolio_volatility = np.std(portfolio_returns)
     VaR_95 = np.percentile(portfolio_returns, 5)
 
+    discount_factor = 1 / ((1 + risk_free_rate) ** (num_days / 252))  # Actualisation pour l'année (252 jours)
+
+    final_value = initial_capital * (1 + np.mean(portfolio_returns))  # Multiplication du capital initial par les rendements
+    present_value = final_value * discount_factor
+
     sortino = sortino_ratio(portfolio_returns)
 
     # Visualisation de la distribution des rendements du portefeuille
@@ -296,31 +321,12 @@ def monte_carlo_simulation(optimal_weights, num_simulations=10000, num_days=252)
         'mean_portfolio_return': mean_portfolio_return,
         'portfolio_volatility': portfolio_volatility,
         'VaR_95': VaR_95,
-        'portfolio_returns': portfolio_returns,
+        'present_value': present_value,
+        'final_value': final_value,
         'sortino_ratio': sortino
     }
 
     return results
-
-def calculate_portfolio_value(optimal_weights, latest_price, total_investment = 100000):
-
-    print(optimal_weights, latest_price)
-
-    allocation = optimal_weights * total_investment
-    print(allocation)
-
-    quantities = allocation / latest_price
-    print(quantities)
-
-    portfolio_value = np.sum(quantities * latest_price)
-    print(portfolio_value)
-
-    return {
-        "portfolio_value": portfolio_value,
-        "allocation": allocation,
-        "quantities": quantities
-    }
-
 
 def app():
     '''This code defines a function app() that is called when the script is executed as the 
@@ -332,6 +338,8 @@ def app():
         st.subheader('Plot of daily returns to see volatility')
         plot_returns(stocks)
         table = download(stocks)
+
+        
 
         returns = table.pct_change()
         mean_returns = returns.mean()
@@ -354,17 +362,10 @@ def app():
 
         bar()
 
-        st.subheader("Pricing du portefeuille")
-        
-        results_pricing = calculate_portfolio_value(optimal_weights, table.iloc[-1])
-        st.write(f"Valeur totale du portefeuille: ${results_pricing["portfolio_value"]:.2f}")
-        st.write(f"Répartition par actif :")
-        allocation_df = pd.DataFrame({
-            "Actif": stocks,
-            "Quantité": results_pricing["quantities"],
-            "Valeur": results_pricing["allocation"]
-        })
-        st.dataframe(allocation_df)
+        st.subheader("Pricing du portefeuille (Valeur actuelle nette)")
+
+        st.write(f"Le prix théorique actuel du portefeuille est : ${results['present_value']:.2f}")
+        st.write(f"Valeur finale du portefeuille après la période simulée : ${results['final_value']:.2f}")
 
         bar()
 
