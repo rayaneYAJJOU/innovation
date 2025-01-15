@@ -6,14 +6,128 @@ import yfinance as yf
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
-import plotly.express as px
+import keras
 from Source.exception import CustomException
 from Source.logger import logging
 from itertools import combinations
 from sklearn.cluster import KMeans
 from math import floor
+from scipy.stats import norm
+from sklearn.preprocessing import MinMaxScaler
 
-def cluster_stocks(returns, num_clusters):
+def train_lstm_model(data, ticker, num_epochs=50, batch_size=32):
+    """
+    Entraîne un modèle LSTM pour prédire les prix des actions.
+
+    :param data: DataFrame contenant les prix historiques des actions
+    :param ticker: Symbole de l'action à utiliser pour l'entraînement
+    :param num_epochs: Nombre d'époques d'entraînement
+    :param batch_size: Taille du batch
+    :return: Modèle LSTM entraîné
+    """
+    # Extraire les prix de l'action spécifique
+    prices = data[[ticker]].values
+
+    # Normaliser les données pour les mettre dans la plage [0, 1]
+    scaler = MinMaxScaler(feature_range=(0, 1))
+    scaled_prices = scaler.fit_transform(prices)
+
+    # Créer les séquences de données pour LSTM
+    X, y = [], []
+    lookback = 60  # Utiliser les 60 derniers jours pour prédire le suivant
+    for i in range(lookback, len(scaled_prices)):
+        X.append(scaled_prices[i - lookback:i, 0])
+        y.append(scaled_prices[i, 0])
+    X, y = np.array(X), np.array(y)
+
+    # Reshaper X pour correspondre aux dimensions attendues par LSTM (samples, timesteps, features)
+    X = X.reshape((X.shape[0], X.shape[1], 1))
+
+    # Construire le modèle LSTM
+    model = keras.models.Sequential()
+    model.add(keras.layers.LSTM(units=50, return_sequences=True, input_shape=(X.shape[1], 1)))
+    model.add(keras.layers.Dropout(0.2))
+    model.add(keras.layers.LSTM(units=50, return_sequences=False))
+    model.add(keras.layers.Dropout(0.2))
+    model.add(keras.layers.Dense(units=1))  # Prédire une valeur de sortie
+
+    # Compiler le modèle
+    model.compile(optimizer='adam', loss='mean_squared_error')
+
+    # Entraîner le modèle
+    model.fit(X, y, epochs=num_epochs, batch_size=batch_size, verbose=1)
+
+    return model, scaler
+
+def predict_future_prices(model, data, ticker, scaler, days_to_predict=252):
+    """
+    Utilise le modèle LSTM pour prédire les prix futurs.
+
+    :param model: Modèle LSTM entraîné
+    :param data: DataFrame contenant les prix historiques
+    :param ticker: Symbole de l'action à prédire
+    :param scaler: Scaler utilisé pour normaliser les données
+    :param days_to_predict: Nombre de jours à prédire
+    :return: Liste des prix prédits
+    """
+    # Extraire les données récentes pour la prédiction
+    recent_data = data[[ticker]].values[-60:]  # Prendre les 60 derniers jours
+    scaled_recent_data = scaler.transform(recent_data)
+
+    # Préparer l'entrée pour la prédiction
+    inputs = scaled_recent_data.reshape(1, -1, 1)
+
+    predicted_prices = []
+    for _ in range(days_to_predict):
+        # Prédire le prix du jour suivant
+        predicted_price = model.predict(inputs, verbose=0)
+        predicted_prices.append(predicted_price[0, 0])
+
+        # Ajouter la prédiction au jeu de données
+        inputs = np.append(inputs[:, 1:, :], [predicted_price], axis=1)
+
+    # Dé-normaliser les prédictions
+    predicted_prices = scaler.inverse_transform(np.array(predicted_prices).reshape(-1, 1))
+    return predicted_prices.flatten()
+
+def black_scholes_basket(weights, prices, volatilities, correlations, strike, T, r, option_type="call"):
+    """
+    Calcule le prix d'une option basket en utilisant le modèle de Black-Scholes.
+    
+    :param weights: Liste des poids pour chaque actif dans le basket
+    :param prices: Liste des prix actuels des actifs
+    :param volatilities: Liste des volatilitités des actifs
+    :param correlations: Matrice de corrélation entre les actifs
+    :param strike: Prix d'exercice (strike price) de l'option
+    :param T: Temps jusqu'à l'échéance (en années)
+    :param r: Taux sans risque (annuel)
+    :param option_type: "call" pour une option d'achat, "put" pour une option de vente
+    :return: Prix de l'option basket
+    """
+    # Calcul du prix synthétique du basket
+    S_basket = np.dot(weights, prices)
+    
+    # Calcul de la volatilité synthétique
+    vol_basket = np.sqrt(
+        np.dot(weights, np.dot(correlations * np.outer(volatilities, volatilities), weights))
+    )
+    
+    # Calcul des paramètres d1 et d2
+    d1 = (np.log(S_basket / strike) + (r + 0.5 * vol_basket**2) * T) / (vol_basket * np.sqrt(T))
+    d2 = d1 - vol_basket * np.sqrt(T)
+    
+    if option_type == "call":
+        # Formule pour une option call
+        price = S_basket * norm.cdf(d1) - strike * np.exp(-r * T) * norm.cdf(d2)
+    elif option_type == "put":
+        # Formule pour une option put
+        price = strike * np.exp(-r * T) * norm.cdf(-d2) - S_basket * norm.cdf(-d1)
+    else:
+        raise ValueError("option_type must be either 'call' or 'put'")
+    
+    return price
+
+def cluster_stocks(returns, num_clusters, metric="mean_return"):
     # Calcul de la matrice de corrélation
     corr_matrix = returns.corr()
     
@@ -34,12 +148,30 @@ def cluster_stocks(returns, num_clusters):
     selected_stocks = []
     for label, st in clustered_stocks.items():
         if len(st) > 0:  # Vérification que le cluster n'est pas vide
-            selected_stocks.append(np.random.choice(st))
+            if metric == 'mean_return':
+                # Calcul de la moyenne des rendements pour chaque action
+                mean_returns = returns[st].mean()
+                best_stock = mean_returns.idxmax()  # Action avec le meilleur rendement moyen
+            elif metric == 'volatility':
+                # Calcul de la volatilité pour chaque action
+                volatilities = returns[st].std()
+                best_stock = volatilities.idxmin()  # Action avec la volatilité la plus faible
+            elif metric == 'sharpe_ratio':
+                # Calcul du ratio de Sharpe pour chaque action
+                mean_returns = returns[st].mean()
+                volatilities = returns[st].std()
+                sharpe_ratios = mean_returns / volatilities
+                best_stock = sharpe_ratios.idxmax()  # Action avec le meilleur ratio de Sharpe
+            else:
+                raise ValueError(f"Métrique inconnue : {metric}")
+            selected_stocks.append(best_stock[0])
     
     return list(map(str, selected_stocks))
 
 def bar():
     st.write("-"*80)
+
+risk_free_rate = 0.0178
 
 #Title
 st.title('RiskLESS')
@@ -69,6 +201,10 @@ num_basket = st.sidebar.number_input('', value = 0, max_value = num_stocks)
 
 st.sidebar.write('4) Enter the investor\'s initial capital')
 initial_capital = st.sidebar.number_input('Initial Capital ($)', min_value=1, value=100000)  # Default value of 100,000$
+
+T = st.sidebar.number_input("Années jusqu'à l'échéance", value=1, min_value=1, step=1)
+strike = st.sidebar.number_input("Strike (Prix d'exercice)", value=initial_capital, step=1)
+r = st.sidebar.number_input("Taux sans risque (%)", value=risk_free_rate * 100, step=0.1) / 100
 
 def download(stocks):  # Function to download stock data
     try:
@@ -285,9 +421,9 @@ def monte_carlo_simulation(basket, optimal_weights, num_simulations=10000, num_d
     st.pyplot(plt)
     
     results = {
-        'mean_portfolio_return': mean_portfolio_return,
-        'portfolio_volatility': portfolio_volatility,
-        'VaR_95': VaR_95,
+        'mean_portfolio_return': mean_portfolio_return * 100,
+        'portfolio_volatility': portfolio_volatility * 100,
+        'VaR_95': VaR_95 * 100,
         'sortino_ratio': sortino
     }
 
@@ -344,7 +480,6 @@ def app():
     '''This code defines a function app() that is called when the script is executed as the 
     main program'''
     if num_stocks > 1 and num_stocks >= num_basket >= 1:
-
         st.subheader('Plot shows how stock prices have evolved in the given time frame')
         plot_download(stocks)
         st.subheader('Plot of daily returns to see volatility')
@@ -365,7 +500,6 @@ def app():
         print(f"start_date : {start_date}")
         print(f"mean_returns : {mean_returns}")
         num_portfolios = 25000
-        risk_free_rate = 0.0178
 
         best_sharpe = -np.inf
         best_basket = []
@@ -391,9 +525,11 @@ def app():
 
         bar()
 
+        tab = table[list(best_basket)]
+
         optimal_weights = best_sharpe.loc["Allocation"].values / 100
 
-        ret_opt = table[list(best_basket)].pct_change()
+        ret_opt = tab.pct_change()
         mean_opt = ret_opt.mean()
         cov_opt = ret_opt.cov()
 
@@ -413,11 +549,80 @@ def app():
 
         bar()
 
-        st.subheader("Gain du portefeuille (option Best of)")
+        st.subheader("Gain du portefeuille")
 
-        st.write(f"Le gain sera basé sur l'action ayant un rendement maximal: {initial_capital * (1 + max(ret_opt))}")
+        st.write("Option Best-of")
+        st.write(f"Le gain sera basé sur l'action ayant un rendement maximal : \${initial_capital} + {np.max(ret_opt) * 100:.2f}\% = \${(initial_capital * (1 + np.max(ret_opt))):.2f}")
+
+        st.write("Option Worst-of")
+        st.write(f"Le gain sera basé sur l'action ayant un rendement minimal : \${initial_capital} - {-np.min(ret_opt) * 100:.2f}\% = \${(initial_capital * (1 - np.min(ret_opt))):.2f}")
+        
+        st.write("Option Average")
+        avg = np.mean(ret_opt)
+
+        if avg >= 0:
+            st.write(f"Le gain sera basé sur la moyenne des rendements : \${initial_capital} + {avg * 100:.2f}\% = \${(initial_capital * (1 + avg)):.2f}")
+        else:
+            st.write(f"Le gain sera basé sur la moyenne des rendements : \${initial_capital} - {-avg * 100:.2f}\% = \${(initial_capital * (1 - avg)):.2f}")
+        
+        bar()
+
+        st.subheader("Pricing du produit structuré")
+
+        # Derniers prix, volatilités, et matrice de corrélation pour le basket
+        prices = tab.iloc[-1].to_numpy()
+        correlations = get_correlation_matrix(cov_opt)
+
+        log_ret = np.log(prices[1:] / prices[:-1])
+        sigma =  log_ret.std()
+        volatilities = sigma * np.sqrt(252)
+
+        # Calcul du prix d'option basket call
+        basket_call_price = black_scholes_basket(
+            weights=optimal_weights,
+            prices=prices,
+            volatilities=volatilities,
+            correlations=correlations,
+            strike=strike,
+            T=T,
+            r=r,
+            option_type="call"
+        )
+
+        basket_put_price = black_scholes_basket(
+            weights=optimal_weights,
+            prices=prices,
+            volatilities=volatilities,
+            correlations=correlations,
+            strike=strike,
+            T=T,
+            r=r,
+            option_type="put"
+        )
+
+        st.write(f"Prix d'option basket call : ${basket_call_price:.2f}")
+        st.write(f"Prix d'option basket put : ${basket_put_price:.2f}")
 
         bar()
+
+        num_days = 252 * T
+
+        for ticker in best_basket:
+            model, scaler = train_lstm_model(tab, ticker)
+            print(f"Model trained successfully for {ticker}!")
+
+            predicted_prices = predict_future_prices(model, tab, ticker, scaler, days_to_predict=num_days)
+
+            # Afficher les prédictions
+            st.subheader(f"Prix prédits pour {ticker} ({num_days} jours)")
+            fig = plt.figure(figsize=(14, 7))
+            plt.plot(range(len(predicted_prices)), predicted_prices, label='Prix prédits')
+            plt.title("Prédictions basées sur LSTM")
+            plt.xlabel("Jour")
+            plt.ylabel("Prix")
+            plt.legend()
+            st.pyplot(fig)
+
     else:
         if num_stocks <= 1:
             st.subheader('Enter your stock tickers, there must be atleast 2 tickers')
@@ -428,4 +633,3 @@ def app():
 
 if __name__ == "__main__":
     app()
-
