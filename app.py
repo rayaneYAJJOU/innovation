@@ -555,7 +555,7 @@ def app():
         st.write(f"Le gain sera basé sur l'action ayant un rendement maximal : \${initial_capital} + {np.max(ret_opt) * 100:.2f}\% = \${(initial_capital * (1 + np.max(ret_opt))):.2f}")
 
         st.write("Option Worst-of")
-        st.write(f"Le gain sera basé sur l'action ayant un rendement minimal : \${initial_capital} - {-np.min(ret_opt) * 100:.2f}\% = \${(initial_capital * (1 - np.min(ret_opt))):.2f}")
+        st.write(f"Le gain sera basé sur l'action ayant un rendement minimal : \${initial_capital} - {-np.min(ret_opt) * 100:.2f}\% = \${(initial_capital * (1 + np.min(ret_opt))):.2f}")
         
         st.write("Option Average")
         avg = np.mean(ret_opt)
@@ -563,7 +563,7 @@ def app():
         if avg >= 0:
             st.write(f"Le gain sera basé sur la moyenne des rendements : \${initial_capital} + {avg * 100:.2f}\% = \${(initial_capital * (1 + avg)):.2f}")
         else:
-            st.write(f"Le gain sera basé sur la moyenne des rendements : \${initial_capital} - {-avg * 100:.2f}\% = \${(initial_capital * (1 - avg)):.2f}")
+            st.write(f"Le gain sera basé sur la moyenne des rendements : \${initial_capital} - {-avg * 100:.2f}\% = \${(initial_capital * (1 + avg)):.2f}")
         
         bar()
 
@@ -614,7 +614,7 @@ def app():
             predicted_prices = predict_future_prices(model, tab, ticker, scaler, days_to_predict=num_days)
 
             # Afficher les prédictions
-            st.subheader(f"Prix prédits pour {ticker} ({num_days} jours)")
+            st.subheader(f"Prix prédits pour {ticker} ({T} années)")
             fig = plt.figure(figsize=(14, 7))
             plt.plot(range(len(predicted_prices)), predicted_prices, label='Prix prédits')
             plt.title("Prédictions basées sur LSTM")
